@@ -1,71 +1,61 @@
-# Install dependencies if not already installed
-# Uncomment these lines if you haven't installed the libraries
-# !pip install haystack sentence-transformers faiss-cpu gradio PyMuPDF
-# Install all necessary libraries
-pip install haystack sentence-transformers faiss-cpu gradio PyMuPDF
+pip install transformers==4.33.2 sentence-transformers==2.2.2 pdfminer.six==20221105 haystack==1.16.1 torch==2.0.1 gradio==3.38.0
+import transformers
+import sentence_transformers
+import pdfminer
+import haystack
+import torch
+import gradio
+
+print("transformers:", transformers.__version__)
+print("sentence-transformers:", sentence_transformers.__version__)
+print("pdfminer:", pdfminer.__version__)
+print("haystack:", haystack.__version__)
+print("torch:", torch.__version__)
+print("gradio:", gradio.__version__)
+
 
 import os
-import fitz  # PyMuPDF for PDF parsing
+from pdfminer.high_level import extract_text
 from sentence_transformers import SentenceTransformer
 from haystack.document_stores import FAISSDocumentStore
-from haystack.nodes import DenseRetriever, TransformersReader
-from haystack.pipelines import ExtractiveQAPipeline
+from haystack.nodes import DenseRetriever
+from haystack.pipelines import FAQPipeline
+from haystack.schema import Document
 import gradio as gr
 
-# Initialize the document store (FAISS) for embeddings
-document_store = FAISSDocumentStore(faiss_index_factory_str="Flat")
+# Step 1: Extract text from PDFs
+def pdf_to_text(pdf_path):
+    return extract_text(pdf_path)
 
-# Initialize the embedding model (Sentence Transformers)
-embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
+data_dir = "path/to/your/pdf_files"
+text_data = [pdf_to_text(os.path.join(data_dir, f)) for f in os.listdir(data_dir) if f.endswith(".pdf")]
 
-# Path to the folder containing PDF files - update this to your PDF folder path
-pdf_folder_path = "path/to/your/pdfs"
+# Step 2: Chunk text
+def chunk_text(text, chunk_size=500):
+    words = text.split()
+    return [" ".join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
 
-def parse_pdf(file_path):
-    """Extracts text from a PDF and returns it as a single string."""
-    text = ""
-    with fitz.open(file_path) as pdf:
-        for page_num in range(len(pdf)):
-            text += pdf[page_num].get_text()
-    return text
+chunked_data = [chunk for text in text_data for chunk in chunk_text(text)]
 
-# Parse PDFs and store text chunks
-docs = []
-for pdf_file in os.listdir(pdf_folder_path):
-    pdf_path = os.path.join(pdf_folder_path, pdf_file)
-    content = parse_pdf(pdf_path)
-    
-    # Split content into chunks (500 words for example)
-    chunks = [content[i:i+500] for i in range(0, len(content), 500)]
-    for chunk in chunks:
-        docs.append({"content": chunk, "meta": {"source": pdf_file}})
+# Step 3: Embed chunks
+embedder = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')
+chunk_embeddings = embedder.encode(chunked_data, convert_to_tensor=True)
 
-# Write documents to the FAISS document store
+# Step 4: Set up FAISS document store and add documents
+document_store = FAISSDocumentStore(embedding_dim=384)
+docs = [Document(content=chunk) for chunk in chunked_data]
 document_store.write_documents(docs)
-
-# Initialize the retriever and update document store with embeddings
-retriever = DenseRetriever(embedding_model=embedding_model, document_store=document_store)
+retriever = DenseRetriever(document_store=document_store, embedding_model=embedder)
 document_store.update_embeddings(retriever)
 
-# Load a basic QA pipeline with a transformer-based reader (smaller model for free usage)
-reader = TransformersReader(model_name_or_path="deepset/roberta-base-squad2", use_gpu=False)
-pipeline = ExtractiveQAPipeline(reader=reader, retriever=retriever)
+# Step 5: Create QA pipeline
+qa_pipeline = FAQPipeline(retriever=retriever)
 
-# Function for chatbot response
-def chatbot(query):
-    # Perform a search in the pipeline
-    prediction = pipeline.run(query=query, params={"Retriever": {"top_k": 5}, "Reader": {"top_k": 1}})
-    answer = prediction["answers"][0].answer if prediction["answers"] else "Sorry, I couldn't find an answer to that."
-    return answer
+# Step 6: Create chatbot function
+def chatbot(question):
+    result = qa_pipeline.run(query=question)
+    return result['answers'][0].answer if result['answers'] else "No relevant information found."
 
-# Gradio interface for the chatbot
-iface = gr.Interface(
-    fn=chatbot,
-    inputs="text",
-    outputs="text",
-    title="Document-based Chatbot",
-    description="Ask questions based on the PDF documents in the database."
-)
-
-# Launch the Gradio app
+# Step 7: Deploy with Gradio
+iface = gr.Interface(fn=chatbot, inputs="text", outputs="text", title="PDF Document QA Bot")
 iface.launch()
