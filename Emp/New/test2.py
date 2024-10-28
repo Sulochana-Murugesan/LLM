@@ -1,6 +1,8 @@
 # Install dependencies if not already installed
 # Uncomment these lines if you haven't installed the libraries
 # !pip install haystack sentence-transformers faiss-cpu gradio PyMuPDF
+# Install all necessary libraries
+pip install haystack sentence-transformers faiss-cpu gradio PyMuPDF
 
 import os
 import fitz  # PyMuPDF for PDF parsing
