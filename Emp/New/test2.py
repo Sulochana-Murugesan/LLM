@@ -7,7 +7,7 @@ import torch
 import gradio
 
 print("transformers:", transformers.__version__)
-print("sentenAIzaSyAkDbRrqW8hNPkUrEw3PZeZr2YNMRZoYIgce-transformers:", sentence_transformers.__version__)
+print("sentence-transformers:", sentence_transformers.__version__)
 print("pdfminer:", pdfminer.__version__)
 print("haystack:", haystack.__version__)
 print("torch:", torch.__version__)
